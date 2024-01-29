@@ -1,0 +1,366 @@
+---
+title: "Lab07"
+author: "Tejaswini Sengaonkar"
+date: "2023-10-08"
+output: html_document
+---
+
+```{r setup}
+library(randomForest)
+library(stats)
+library(cluster)
+library(mclust)
+library(e1071)
+zip <- read.csv("/course/data/zip/zip.csv")
+```
+
+Introduction 
+
+1. In your own words, describe briefly the data and the practical problems that are associated with them.
+
+The provided data represents grayscale 16x16 images of handwritten single-digit numerals from 0 to 9. Each observation has a response variable "digit" indicating the handwritten digit (either 4 or 9), and 
+256 predictor variables (p1–p256) representing the pixel values of the image.With 256 predictor variables (pixel values), the dataset has high dimensionality.Handwritten digits can have inherent noise and variability due to different writing styles. This can make it challenging for models to generalize well to unseen data.The distribution of digits 4 and 9 may not be equal, leading to class imbalance. This imbalance can affect the performance of machine learning models, especially if the algorithm is biased towards the majority class.While the pixel values serve as features, additional feature engineering might be necessary to enhance model performance. Feature selection or transformation techniques could be explored.
+
+Variable Selection
+
+2. Ensemble methods are excellent tools for finding important predictor variables. In aid of Random Forest, find the two most important predictors out of 256 ones, in terms of the Gini index, for classifying between observations with digit=4 and digit=9. (You may find the same two predictors as mine, if you also run set.seed(769).)
+
+What is the OOB error using all predictors? What is the OOB error if only the two selected predictors are used in the Random Forest model?
+
+```{r two}
+data <- zip[zip$digit %in% c(4, 9), ]
+set.seed(769)
+
+rf_model <- randomForest(factor(digit) ~ ., data = data, ntree = 100)
+
+importance_values <- importance(rf_model)
+top_predictors <- head(importance_values[order(-importance_values[, "MeanDecreaseGini"]), ], 2)
+
+oob_error_all <- 1 - rf_model$err.rate[nrow(rf_model$err.rate), "OOB"]
+
+top_predictor_names <- names(top_predictors)
+
+rf_model_selected <- randomForest(factor(digit) ~ ., data = data[, c("digit", top_predictor_names)], ntree = 100)
+
+oob_error_selected <- 1 - rf_model_selected$err.rate[nrow(rf_model_selected$err.rate), "OOB"]
+
+cat("OOB error using all predictors:", oob_error_all, "\n")
+cat("OOB error using only the two selected predictors:", oob_error_selected, "\n")
+```
+
+Clustering
+
+3. Without using the digit variable, run the K-means algorithm to partition the images into K = 2, 3, ..., 7 clusters, respectively.
+
+Compute the adjusted Rand indices for these clustering results, by comparing them with the true class labels. Does this unsupervised learning method do a good job for the supervised data set here, in particular when K=2?
+
+```{r three}
+adjusted_rand_indices <- numeric(6)
+true_labels <- data$digit
+features <- data[, !(names(data) %in% c("digit"))]
+
+for (k in 2:7) {
+   kmeans_result <- kmeans(features, centers = k)
+
+   # Compute adjusted Rand index
+   adjusted_rand_indices[k - 1] <- adjustedRandIndex(kmeans_result$cluster, true_labels)
+}
+
+cat("Adjusted Rand Indices for K =", 2:7, ":", adjusted_rand_indices, "\n")
+
+```
+
+The highest ARI is 0.305282 when K=2.As the the number of clusters are increased, the performance deteriorates.
+
+Task 4
+
+4.
+
+```{r four}
+adjusted_rand_indices_hclust <- matrix(0, nrow = 4, ncol = 6)  # 4 methods x 6 K values
+
+# Linkage methods
+linkage_methods <- c("complete", "single", "average", "centroid")
+
+# Loop over different values of K
+for (k in 2:7) {
+  # Extract features (excluding the digit variable)
+  features <- data[, !(names(data) %in% c("digit"))]
+  
+  # True class labels
+  true_labels <- data$digit
+  
+  # Loop over different linkage methods
+  for (i in seq_along(linkage_methods)) {
+    method <- linkage_methods[i]
+    
+    # Run hierarchical clustering
+    hclust_result <- hclust(dist(features), method = method)
+    
+    # Cut the dendrogram to get clusters
+    clusters <- cutree(hclust_result, k = k)
+    
+    # Compute adjusted Rand index
+    adjusted_rand_indices_hclust[i, k - 1] <- adjustedRandIndex(clusters, true_labels)
+  }
+}
+
+# Print adjusted Rand indices for each K and linkage method
+cat("Adjusted Rand Indices for Hierarchical Clustering with Different Linkage Methods and K Values:\n")
+print(adjusted_rand_indices_hclust)
+
+```
+
+It is evident that the average and centroid linkage methods generally outperform other linkage types, especially for lower values of k (approximately when k=2 or 3), as indicated by higher Adjusted Rand Index (ARI) values. This suggests that for higher values of k, there might be an issue of overfitting in the clusters. The superior performance of average and centroid linkages could be attributed to their resilience to outliers.
+
+This trend becomes more pronounced when comparing with the results of single linkage, where ARI values are consistently close to 0 for all k values. Single linkages are known for their high sensitivity to outliers, which could explain their comparatively poorer performance across different cluster sizes.
+
+
+5.
+
+```{r five}
+par(mfrow = c(1, 1))
+
+cluster_results <- list(
+  class_labels = data$digit,
+  K_means = kmeans(data[, names(top_predictors)], centers = 2)$cluster,
+  complete_linkage = cutree(hclust(dist(data[, names(top_predictors)]), method = "complete"), 2),
+  single_linkage = cutree(hclust(dist(data[, names(top_predictors)]), method = "single"), 2),
+  average_linkage = cutree(hclust(dist(data[, names(top_predictors)]), method = "average"), 2),
+  centroid_linkage = cutree(hclust(dist(data[, names(top_predictors)]), method = "centroid"), 2)
+)
+
+par(mfrow = c(2, 3), mar = c(4, 4, 2, 1), oma = c(0, 0, 2, 0))
+
+colors <- c("red", "blue")
+# Create scatter plots for each clustering result
+for (i in 1:length(cluster_results)) {
+  plot(data[, names(top_predictors)], col = colors[cluster_results[[i]]], pch = 19,
+       main = paste(names(cluster_results)[i], "- ARI:", 
+                    round(adjustedRandIndex(cluster_results[[i]], data$digit), 3)), 
+       xlab = "First Predictor", ylab = "Second Predictor")
+}
+
+# Reset the plot layout
+par(mfrow = c(1, 1))
+```
+
+6. 
+```{r six}
+train_data <- zip[1:1000, ]
+test_data <- zip[1001:nrow(zip), ]
+predictors_2 <- c("p9", "p25")
+predictors_256 <- paste0("p", 1:256)
+
+results <- matrix(0, nrow = length(c(0.001, 0.01, 0.1, 1, 10, 100)), ncol = 2)
+
+for (i in seq_along(c(0.001, 0.01, 0.1, 1, 10, 100))) {
+  cost_value <- c(0.001, 0.01, 0.1, 1, 10, 100)[i]
+
+  # Train support vector machine with a linear kernel
+  svm_model <- svm(factor(digit) ~ ., data = train_data, kernel = "linear", cost = cost_value, scale = FALSE)
+
+  # Make predictions on the test data
+  predictions <- predict(svm_model, test_data)
+
+  # Calculate accuracy
+  accuracy <- sum(predictions == test_data$digit) / nrow(test_data)
+
+  # Store results
+  results[i, ] <- c(cost_value, accuracy)
+
+  # Plot decision boundary
+  if (length(predictors_2) == 2) {
+    # Extract support vectors and coefficients
+    sv_coef <- t(svm_model$coefs) %*% svm_model$SV
+    intercept <- -svm_model$rho
+    weights <- colMeans(sv_coef)
+    
+    # Plot data points
+    plot(train_data[, predictors_2], col = as.factor(train_data$digit))
+    
+    # Add decision boundary
+    abline(-weights[1]/weights[2], weights[3]/weights[2], col = "red")
+    
+    title(paste("Decision Boundary - Cost =", cost_value))
+  }
+}
+
+# Print results
+print(results)
+
+```
+
+7.
+
+```{r seven}
+train_data <- zip[1:1000, ]
+test_data <- zip[1001:nrow(zip), ]
+
+# Select predictors (2 predictors for Tasks 6-8, and 256 predictors for Task 9)
+predictors_2 <- c("p9", "p25")
+predictors_256 <- paste0("p", 1:256)
+
+# Initialize a matrix to store the results
+results <- matrix(0, nrow = length(c(0.001, 0.01, 0.1, 1, 10, 100)), ncol = 3)
+
+# Loop over different values of cost
+for (i in seq_along(c(0.001, 0.01, 0.1, 1, 10, 100))) {
+  cost_value <- c(0.001, 0.01, 0.1, 1, 10, 100)[i]
+
+  # Train support vector machine with a linear kernel
+  svm_model <- svm(factor(digit) ~ ., data = train_data, kernel = "linear", cost = cost_value, scale = FALSE)
+
+  # Make predictions on the training data
+  train_predictions <- predict(svm_model, train_data)
+  
+  # Make predictions on the test data
+  test_predictions <- predict(svm_model, test_data)
+
+  # Calculate training error (misclassification rate)
+  train_error <- sum(train_predictions != train_data$digit) / nrow(train_data)
+  
+  # Calculate test error (misclassification rate)
+  test_error <- sum(test_predictions != test_data$digit) / nrow(test_data)
+
+  # Store results
+  results[i, ] <- c(cost_value, train_error, test_error)
+}
+
+# Print results
+print(results)
+
+# Plotting the trend of errors with respect to the value of cost
+plot(results[, 1], results[, 2], type = "b", col = "blue", pch = 16, ylim = c(0, max(results[, c(2, 3)])),
+     xlab = "Cost", ylab = "Misclassification Rate", main = "Training and Test Errors vs. Cost")
+lines(results[, 1], results[, 3], type = "b", col = "red", pch = 16)
+legend("topright", legend = c("Training Error", "Test Error"), col = c("blue", "red"), pch = 16)
+
+# Identify the best value for cost based on test errors
+best_cost <- results[which.min(results[, 3]), 1]
+cat("Best value for cost based on test errors:", best_cost, "\n")
+```
+
+8.
+
+```{r eight, eval=FALSE}
+results_radial <- matrix(0, nrow = length(c(0.001, 0.01, 0.1, 1, 10, 100)), ncol = 3)
+
+# Loop over different values of gamma
+for (i in seq_along(c(0.001, 0.01, 0.1, 1, 10, 100))) {
+  gamma_value <- c(0.001, 0.01, 0.1, 1, 10, 100)[i]
+
+  # Train support vector machine with a radial kernel
+  svm_model_radial <- svm(factor(digit) ~ ., data = train_data, kernel = "radial", cost = 1, gamma = gamma_value, scale = FALSE)
+
+  # Make predictions on the training data
+  train_predictions_radial <- predict(svm_model_radial, train_data)
+
+  # Make predictions on the test data
+  test_predictions_radial <- predict(svm_model_radial, test_data)
+
+  # Calculate training error (misclassification rate)
+  train_error_radial <- sum(train_predictions_radial != train_data$digit) / nrow(train_data)
+
+  # Calculate test error (misclassification rate)
+  test_error_radial <- sum(test_predictions_radial != test_data$digit) / nrow(test_data)
+
+  # Store results for radial kernels
+  results_radial[i, ] <- c(gamma_value, train_error_radial, test_error_radial)
+
+  # Create a meshgrid for the plot
+  x1 <- seq(min(train_data$p9), max(train_data$p9), length = 100)
+  x2 <- seq(min(train_data$p25), max(train_data$p25), length = 100)
+  grid <- expand.grid(p9 = x1, p25 = x2)
+
+  # Predictions on the meshgrid
+  grid$predicted <- predict(svm_model_radial, newdata = grid)
+
+  # Scatter plot
+  plot(train_data[, c("p9", "p25")], col = colors[as.numeric(train_data$digit)], pch = 19,
+       main = paste0("Classification Plot - Gamma =", gamma_value),
+       xlab = "First Predictor", ylab = "Second Predictor")
+
+  # Add points for the predicted values on the meshgrid
+  points(grid[, c("p9", "p25")], col = colors[as.numeric(as.factor(grid$predicted))], pch = 19, cex = 0.5)
+
+  # Add contour lines for the decision boundary
+  contour(x = x1, y = x2, z = matrix(attr(predict(svm_model_radial, newdata = grid, probability = TRUE), "probabilities")[, 1], nrow = length(x1)),
+          levels = c(0.1, 0.5, 0.9), lwd = c(1, 2, 1), lty = c(3, 1, 3), drawlabels = FALSE, add = TRUE)
+}
+
+# Print results for radial kernels
+print(results_radial)
+
+# Identify the best value for gamma based on test errors
+best_gamma <- results_radial[which.min(results_radial[, 3]), 1]
+cat("Best value for gamma based on test errors:", best_gamma, "\n")
+```
+
+9.
+
+```{r nine, eval=FALSE}
+cost_values <- c(0.001, 0.01, 0.1, 1, 10, 100)
+gamma_values <- c(0.001, 0.01, 0.1, 1, 10, 100)
+
+best_cost <- NULL
+best_gamma <- NULL
+best_model <- NULL
+best_test_error <- Inf
+
+predictors <- setdiff(names(train_data), "digit")
+
+results <- data.frame(Cost = numeric(), Gamma = numeric(), Training_Error = numeric(), Test_Error = numeric())
+
+for (cost in cost_values) {
+  for (gamma in gamma_values) {
+
+    svm_model <- svm(digit ~ ., data = train_data, kernel = "linear", cost = cost, gamma = gamma)
+
+    train_pred <- predict(svm_model, train_data[predictors])
+    test_pred <- predict(svm_model, test_data[predictors])
+    
+    train_error <- mean(train_data$digit != train_pred)
+    test_error <- mean(test_data$digit != test_pred)
+    
+    results <- rbind(results, data.frame(Cost = cost, Gamma = gamma, Training_Error = train_error, Test_Error = test_error))
+    
+    if (test_error < best_test_error) {
+      best_cost <- cost
+      best_gamma <- gamma
+      best_model <- svm_model
+      best_test_error <- test_error
+      best_train_error <- train_error
+    }
+  }
+}
+
+# best results
+cat("best cost =", best_cost, "\n")
+cat("best gamma value =", best_gamma, "\n")
+cat("Training error =", train_error, "\n")
+cat("Test error =", best_test_error, "\n")
+
+# Results (using Linear kernel)
+## best cost = 0.01
+## best gamma value = 0.001
+## Training error = 0
+## Test error = 0.011
+
+```
+
+
+
+Summary
+
+Data Description:
+The dataset used in this lab consists of grayscale 16x16 images of handwritten single-digit numerals from 0 to 9. Each observation contains a response variable 'digit' indicating the handwritten digit (either 4 or 9) and 256 predictor variables (p1–p256) representing pixel values.
+
+Variable Selection:
+Random Forest was employed to identify the two most important predictors for classifying between observations with digit=4 and digit=9. Out-of-Bag (OOB) errors were calculated using all predictors and only the two selected predictors.
+
+Clustering:
+K-means clustering, both with and without using the 'digit' variable, was performed to partition images into different clusters. Adjusted Rand indices were used to assess clustering quality, with K=2 providing the best results. Hierarchical clustering with various linkage methods was also explored, and scatter plots were created to visualize partitioning results.
+
+Support Vector Machines:
+Linear Support Vector Machines (SVMs) were trained for different cost values, and classification plots were generated to visualize decision boundaries. Radial SVMs were trained for different gamma values. The final task involved training SVMs with all 256 predictors, selecting the best hyperparameters using cross-validation, and computing training and test errors.

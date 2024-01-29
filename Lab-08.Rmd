@@ -1,0 +1,323 @@
+---
+title: "Lab8"
+author: "Tejaswini Sengaonkar"
+date: "2023-10-16"
+output: html_document
+---
+
+1.
+
+The dataset consists of a collection of normalized handwritten digits that were automatically scanned from envelopes by the U.S. Postal Service. The original scanned digits were binary and varied in size and orientation. However, the images provided in the dataset have undergone preprocessing, including deslanting and size normalization. As a result, each image in the dataset is represented as a 16 x 16 grayscale image.
+
+The dataset is  structured with each line containing information about a single digit instance. The format seems to include the digit ID (ranging from 0 to 9) followed by 256 grayscale values representing the pixel intensities of the 16 x 16 image.
+
+The data mining problems include  neural networks, to train models that can accurately predict or classify the handwritten digits based on their pixel values. The goal is to develop models capable of recognizing and distinguishing between different digits. 
+
+```{r setup}
+library(keras)
+zip <- read.csv("/course/data/zip/zip.csv")
+```
+
+2. 
+
+```{r two}
+
+digit_indices <- matrix(0, nrow = 10, ncol = 10)
+
+# Function to get a random index for a digit
+get_random_index <- function(digit) {
+  indices <- which(zip$digit == digit)
+  return(sample(indices, 1))
+}
+
+# Fill the digit_indices matrix with random indices
+for (digit in 0:9) {
+  for (i in 1:10) {
+    digit_indices[digit + 1, i] <- get_random_index(digit)
+  }
+}
+
+# Plot the images
+par(mar = rep(0, 4), mfrow = c(10, 10))
+for (i in 1:10) {
+  for (j in 1:10) {
+    index <- digit_indices[i, j]
+    image <- matrix(as.numeric(zip[index, -1]), nrow = 16, byrow = TRUE)
+    
+    # Scale picture to [0,1]
+    image <- (1 + image) / 2
+    image[is.na(image)] <- 0
+    
+    # Reverse black and white (optional)
+    image <- 1 - image
+    
+    plot(as.raster(image), xlab = "", ylab = "", xaxt = "n", yaxt = "n")
+  }
+}
+```
+
+3. 
+
+```{r three}
+
+sub_data =  zip[zip$digit %in% c(4, 9),]
+sub_data = sub_data[, c("digit","p9", "p24")]
+sub_data$digit = factor(sub_data$digit)
+
+train_data = sub_data[1:1000,]
+test_data = sub_data[-(1:1000),]
+
+train_x <- as.matrix(train_data[, c("p9", "p24")])
+train_y <- to_categorical(as.numeric(train_data$digit) - 1, num_classes = 2)
+
+test_x <- as.matrix(test_data[, c("p9", "p24")])
+test_y <- to_categorical(as.numeric(test_data$digit) - 1, num_classes = 2)
+
+nn_model <- keras_model_sequential() %>%
+  layer_dense(units = 3, input_shape = 2, activation = "relu") %>%
+  layer_dense(units = 2, activation = "softmax")
+
+nn_model %>% compile(
+  loss = "categorical_crossentropy",
+  optimizer = optimizer_adam(),
+  metrics = c("accuracy")
+)
+
+train <- nn_model %>% fit(
+  train_x, train_y,
+  epochs = 20,
+  batch_size = 32,
+  validation_data = list(test_x, test_y),
+  verbose = 2
+)
+
+yhat_train <- nn_model %>%
+  predict(train_x, verbose = 0) %>%
+  k_argmax() %>%
+  as.integer()
+
+yhat_test <- nn_model %>%
+  predict(test_x, verbose = 0) %>%
+  k_argmax() %>%
+  as.integer()
+
+train_error <- mean(yhat_train != train_y)
+test_error <- mean(yhat_test != test_y)
+
+cat("Training Error :", train_error, "\n")
+cat("Test Error :", test_error, "\n")
+
+```
+
+4.
+
+```{r four}
+nn_model_two <- keras_model_sequential() %>%
+  layer_dense(units = 2, input_shape = 2, activation = "relu") %>%
+  layer_dense(units = 3, activation = "relu") %>%
+  layer_dense(units = 2, activation = "softmax")
+
+nn_model_two %>% compile(
+  loss = "categorical_crossentropy",
+  optimizer = optimizer_adam(),
+  metrics = c("accuracy")
+)
+
+train <- nn_model_two %>% fit(
+  train_x, train_y,
+  epochs = 20,
+  batch_size = 32,
+  validation_data = list(test_x, test_y),
+  verbose = 2
+)
+
+yhat_train <- nn_model_two %>%
+  predict(train_x, verbose = 0) %>%
+  k_argmax() %>%
+  as.integer()
+
+yhat_test <- nn_model_two %>%
+  predict(test_x, verbose = 0) %>%
+  k_argmax() %>%
+  as.integer()
+
+train_error <- mean(yhat_train != as.integer(train_y[, 2]))
+test_error <- mean(yhat_test != as.integer(test_y[, 2]))
+
+cat("Training Error :",train_error, "\n")
+cat("Test Error :",test_error, "\n")
+```
+
+5.
+
+```{r five}
+plot_decision_boundary <- function(model, title, x, y) {
+  grid_range <- expand.grid(p9 = seq(min(x[, 1]), max(x[, 1]), length.out = 50),
+                            p24 = seq(min(x[, 2]), max(x[, 2]), length.out = 50))
+  
+  grid_matrix <- as.matrix(grid_range)
+  
+  grid_predictions <- predict(model, as.matrix(grid_matrix))
+  grid_predictions <- as.numeric(grid_predictions > 0.5)
+  
+  plot(NA, xlim = range(grid_range$p9), ylim = range(grid_range$p24), xlab = "p9", ylab = "p24", main = title)
+  points(grid_range$p9, grid_range$p24, col = grid_predictions + 1, pch = 19, cex = 0.5)
+  
+  true_labels <- max.col(y)
+  
+  points(x[, 1], x[, 2], col = true_labels, pch = 19)
+  
+  legend_labels <- c("Model", "Digit 4", "Digit 9")
+  point_colors <- c(1, 1, 2)
+  
+  legend("topright", legend = legend_labels, col = point_colors, pch = 19, cex = 1, bg = "white")
+}
+
+
+par(mfrow = c(1, 2))
+plot_decision_boundary(nn_model, "Model 1", train_x, as.matrix(train_y))
+plot_decision_boundary(nn_model_two, "Model 2", train_x, as.matrix(train_y))
+
+par(mfrow = c(1, 1))
+```
+
+6.
+
+```{r six}
+summary(nn_model_two)
+```
+
+The output shape of (None, 2) for first layer has 2 neurons and 6 parameters (2 parameters for each neuron) and 1 bias term for each neuron.
+The second layer has has 3 neurons, 9 parameters and 1 bias term for each neuron.
+the third layer again has 2 neurons with 8 parameters and 1 bias term for each neuron
+Total Trainable Parameters: 6+9+8=23
+
+7.
+
+```{r seven}
+sub_data =  zip[zip$digit %in% c(4, 9),]
+sub_data$digit = factor(sub_data$digit)
+
+
+train_data = sub_data[1:1000,]
+test_data = sub_data[-(1:1000),]
+
+x_train = as.matrix(train_data[, -1])
+y_train = to_categorical(as.numeric(train_data$digit) - 1, num_classes = 2)
+
+x_test = as.matrix(test_data[, -1])
+y_test = to_categorical(as.numeric(test_data$digit) - 1, num_classes = 2)
+
+x_train = array_reshape(x_train, c(dim(x_train)[1], 16, 16, 1))
+x_test = array_reshape(x_test, c(dim(x_test)[1], 16, 16, 1))
+
+cnn_model <- keras_model_sequential() %>%
+  layer_conv_2d(filters = 32, kernel_size = c(3, 3), activation = 'relu', input_shape = c(16, 16, 1)) %>%
+  layer_max_pooling_2d(pool_size = c(2, 2)) %>%
+  layer_conv_2d(filters = 64, kernel_size = c(3, 3), activation = 'relu') %>%
+  layer_max_pooling_2d(pool_size = c(2, 2)) %>%
+  layer_flatten() %>%
+  layer_dense(units = 64, activation = 'relu') %>%
+  layer_dropout(rate = 0.5) %>%
+  layer_dense(units = 2, activation = 'softmax')  # Change here
+
+cnn_model %>% compile(
+  loss = 'binary_crossentropy',
+  optimizer = optimizer_adam(),
+  metrics = 'accuracy'
+)
+
+train <- cnn_model %>% fit(
+  x_train, y_train,
+  epochs = 10,
+  batch_size = 32,
+  validation_data = list(x_test, y_test),
+  verbose = 2
+)
+
+yhat_train <- cnn_model %>%
+  predict(x_train, verbose = 0) %>%
+  k_argmax() %>%
+  as.integer()
+
+yhat_test <- cnn_model %>%
+  predict(x_test, verbose = 0) %>%
+  k_argmax() %>%
+  as.integer()
+
+train_error <- mean(yhat_train != as.integer(y_train[, 2]))
+test_error <- mean(yhat_test != as.integer(y_test[, 2]))
+
+cat("Training Error :", train_error, "\n")
+cat("Test Error :", test_error, "\n")
+```
+
+8.
+
+```{r eight}
+mnist <- dataset_mnist()
+x_train <- mnist$train$x
+y_train <- mnist$train$y
+x_test <- mnist$test$x
+y_test <- mnist$test$y
+
+x_train <- array_reshape(x_train, c(dim(x_train)[1], 28, 28, 1)) / 255
+x_test <- array_reshape(x_test, c(dim(x_test)[1], 28, 28, 1)) / 255
+
+y_train <- to_categorical(y_train, num_classes = 10)
+y_test <- to_categorical(y_test, num_classes = 10)
+
+cnn_model <- keras_model_sequential() %>%
+  layer_conv_2d(filters = 32, kernel_size = c(3, 3), activation = 'relu', input_shape = c(28, 28, 1)) %>%
+  layer_max_pooling_2d(pool_size = c(2, 2)) %>%
+  layer_conv_2d(filters = 64, kernel_size = c(3, 3), activation = 'relu') %>%
+  layer_max_pooling_2d(pool_size = c(2, 2)) %>%
+  layer_flatten() %>%
+  layer_dense(units = 64, activation = 'relu') %>%
+  layer_dropout(rate = 0.5) %>%
+  layer_dense(units = 10, activation = 'softmax')
+
+cnn_model %>% compile(
+  loss = 'categorical_crossentropy',
+  optimizer = optimizer_adam(),
+  metrics = 'accuracy'
+)
+
+history <- cnn_model %>% fit(
+  x_train, y_train,
+  epochs = 10,
+  batch_size = 32,
+  validation_data = list(x_test, y_test),
+  verbose = 2
+)
+
+evaluate_result <- cnn_model %>% evaluate(x_test, y_test, verbose = 0)
+cat("Test Loss:", evaluate_result[[1]], "\n")  
+cat("Test Accuracy:", evaluate_result[[2]], "\n") 
+```
+
+9.
+
+```{r nine}
+summary(cnn_model)
+```
+
+The first layer, Conv2D (conv2d_11), applies a convolution operation with 32 filters of size 3x3, resulting in 320 parameters. The subsequent MaxPooling2D layer (max_pooling2d_11) performs max pooling with a pool size of 2x2, contributing no trainable parameters. The second Conv2D layer (conv2d_10) introduces 18,496 parameters with 64 filters of size 3x3. The following MaxPooling2D layer (max_pooling2d_10) is again parameter-free. The Flatten layer (flatten_5) reshapes the output to (None, 1600) with no trainable parameters. The subsequent Dense layer (dense_22) is fully connected with 64 units, yielding 102,464 parameters. The Dropout layer (dropout_5) introduces regularization with no additional parameters. The final Dense layer (dense_21) has 10 units, representing the output classes, and contributes 650 parameters. The "Total params" (121,930) denotes the overall number of trainable parameters, with all layers being trainable, as indicated by "Trainable params."
+
+10.
+
+This lab involves the exploration of a dataset comprising normalized handwritten digits scanned by the U.S. Postal Service. The original binary images of varying sizes and orientations have been preprocessed to produce 16 x 16 grayscale images. The lab utilizes the Keras library in R for implementing neural networks and convolutional neural networks (CNNs) to address classification problems related to digit recognition.
+
+In the initial sections, the dataset is loaded and visualized, showcasing randomly selected instances of digits from 0 to 9. Subsequently, two neural network models are trained using a subset of the data containing digits 4 and 9. The first model is a simple neural network with one hidden layer, while the second model is a deeper neural network with two hidden layers. The models are trained and evaluated for both training and test errors.
+
+We have also visualized decision boundaries, aiding in understanding how the models classify different regions of the input space. The parameters of the neural network models are examined, and their architectures are detailed, including the number of trainable parameters in each layer.
+
+A convolutional neural network (CNN) is designed and trained to classify digits 4 and 9. The CNN model consists of convolutional layers, max-pooling layers, a flatten layer, and dense layers. The model is trained and evaluated for classification performance on training and test sets.
+
+Finally, there is application to a 10-class classification problem using the MNIST dataset, a well-known dataset of handwritten digits from 0 to 9. The CNN is adapted for this 10-class problem and trained on the MNIST dataset. The test accuracy and loss are reported for evaluation.
+
+
+
+
+
+

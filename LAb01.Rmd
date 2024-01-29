@@ -1,0 +1,208 @@
+---
+title: "Lab01"
+author: "Tejaswini Sengaonkar"
+date: "2023-08-01"
+output: html_document
+---
+
+# STATS 769 Lab 01
+
+## Tasks
+
+### Unix
+
+In this section, you should not make use of R at all; instead you should write shell (bash) commands.
+
+NOTE that you can include bash code chunks in your R Markdown file as well as r code chunks.
+
+Show the Unix command that you would use to create a directory to hold the files for this lab (including your R Markdown file) and show the Unix command to navigate to that directory.
+
+DO NOT evaluate this code (i.e., use eval=FALSE in the chunk options).
+
+```{bash eval=FALSE}
+mkdir /home/user/lab1
+cd /home/user/lab1
+
+
+```
+
+Write a shell command that shows information about all the data files including the size in bytes for each of them.
+
+```{bash}
+ls -l
+```
+
+Write a shell command that shows the number of lines in the medicaments-2020.csv file.
+
+```{bash}
+wc -l medicaments-2020.csv
+```
+
+We are interested in records HS code (HSC) 3004901919. Write a shell command that extracts all records with HSC 3004901919 from all the files into a new file 3004901919.data. Then write a shell command that counts the number of lines in the newly created file.
+
+```{bash}
+grep "3004901919" *.csv | sed 's/.*://' > 3004901919.data
+wc -l 3004901919.data
+```
+
+Write a shell command that extracts the month column from the 3004901919.data file and prints the smallest value of that column. Repeat the same for the largest value. Do you see anything suspicious?
+
+```{bash}
+awk -F',' '{print $1}' 3004901919.data | sort -n | head -n 1
+awk -F',' '{print $1}' 3004901919.data | sort -n | tail -n 1
+```
+
+Write a shell script which returns total counts (number of lines) for all HS codes (taking into account all files) in ascending count order and print the last five lines of the output.
+
+```{bash}
+cat *.csv | sed '1d; s/^[^,]*,//' | sed 's/,.*//' | sort | uniq -c | sort | tail -n 5
+```
+
+We are interested in specific medicaments for humans which are not otherwise classified. Those have the following HS codes: 3004901902, 3004901908, 3004901912, 3004901919, 3004901929, 3004901930. Write one or more shell comands that that create a valid CSV file named select-meds.csv from all the medicaments data files containing only the HS codes listed above.
+
+```{bash}
+head -n 1 medicaments-2000.csv > select-meds.csv
+
+grep -E '(3004901902|3004901908|3004901912|3004901919|3004901929|3004901930)' medicaments-20*.csv | sed 's/.*://' >> select-meds.csv
+```
+
+## Import
+
+8.  Read the select-meds.csv CSV file into R (if you did not finish the above, you can also find a copy in /course/data/trade on the VMs and on Canvas). Your code should generate a data frame meds.
+
+```{r data}
+meds <- read.csv("C:/Users/tejas/Downloads/select-meds.csv")
+head(meds)
+str(meds)
+```
+
+## Clean
+
+9.  The original column names are unwieldly, write R code to replace them with shorter alternatives. Numeric variables seem to be encoded as strings and contain thousands separators. Write R code to turn them into proper numeric vectors. Similarly, create a new variable Date based on the Month variable which is contiguous and more suitable for modeling.
+
+```{r clean}
+meds$Date <- as.Date(paste(
+  substr(meds$Month, 1, 4),
+  substr(meds$Month, 5, 6),
+  "01", sep="-"))
+
+meds$Imports...NZD.vfd. <- as.numeric(gsub(",","",meds$Imports...NZD.vfd.))
+meds$Imports...NZD.cif. <- as.numeric(gsub(",","",meds$Imports...NZD.cif.))
+meds$Imports.Qty <- as.numeric(gsub(",","",meds$Imports.Qty))
+
+
+names(meds)[names(meds) == "Harmonised.System.Code"] <- "HSC"
+names(meds)[names(meds) == "Harmonised.System.Description"] <- "HSDescription"
+names(meds)[names(meds) == "Unit.Qty"] <- "Unit"
+names(meds)[names(meds) == "Imports...NZD.vfd."] <- "VFD"
+names(meds)[names(meds) == "Imports...NZD.cif."] <- "CIF"
+names(meds)[names(meds) == "Imports.Qty"] <- "Quantity"
+names(meds)[names(meds) == "X"] <- "Unknown"
+
+str(meds)
+
+```
+
+## Explore
+
+10. Create a bar plot of the total imported value (VFD) by country. What do we learn? Can you identify all countries in the plot? If not, propose a solution that allows us to focus on the top countries by volume - possibly also suggesting a transformation if appropriate.
+
+```{r exploreone}
+par(mar=c(2,8,0.5,2))
+data <- sort(xtabs(VFD ~ Country, meds))
+barplot(data, horiz=TRUE,col = "skyblue", las=1, cex.names=0.8)
+
+#with log transformation
+par(mar=c(2,8,0.5,2))
+data <- sort(xtabs(VFD ~ Country, meds))
+barplot(data, horiz=TRUE,col = "pink", las=1, cex.names=0.6)
+
+
+```
+
+11. We want to look at the evolution of the import value by HS code over time. Compute the aggregated monthly import value (VFD) of each HS code and draw a line plot of the result.
+
+Hint: xtabs and matplot are your friends here - look up the usage in R help if necessary.
+
+```{r exploretwo}
+
+meds <- transform(meds, VFD=VFD/1e6)
+
+aggregated_data <- xtabs(VFD ~ Date + HSC, data = meds)
+
+# Plot the matrix using matplot
+matplot(as.Date(rownames(aggregated_data)),aggregated_data, type = "l", lty = 1, col = 1:length(rownames(aggregated_data)),
+        xlab = "Date", ylab = "Value for Duty in Millions NZD", 
+        main = "Total Monthly Import Value by HS Code")
+
+
+```
+
+What does the plot tell us? Support any hypotheses by R code. Propose a solution to make the data set consistent for further analysis (no code needed, just describe your approach).
+
+If we observe the plot, we can see that there is an increase in the value for duty for one HS code from 2000 to 2008 approximately. Later the is again a little decrease but the duty value remains somewhat constant around 2018. After that there is a sudden drop in the duty value which remains there till 2020. We can assume that these occur due to some changes in trade policies or economic conditions that led to an initial increase in duty and later stabilization. For the HS code value in sky blue color, there is almost zero duty value til 1026, but there is a sudden increase around that year and later the duty value keeps increasing till 2020.This could indicate a change in import policies, trade restrictions, or an effort to protect domestic industries. We can observe that values for most of the HS code are low or zero for a quite a long period. To support these hypotheses, we can use R code to perform statistical analysis, time series analysis, and hypothesis testing on the dataset. By analyzing the historical context and examining the economic events around specific time points mentioned in the plot, we can further validate the reasons behind these trends.
+
+## Model
+
+12. Let us focus on the imports from Australia, i.e., the following should be performed on the subset of meds where the Country is Australia. We want to predict the total monthly VFD import value (aggregated over all HS codes) over time. In order to make interpretation easier, scale the VFD variable such that its unit are millions of NZD. We are going to limit ourselves to simple linear regression.
+
+Generate training and test sets, where the training set is 92% of the data and the test set is only 8% of the data. Choose the dataset partitions such that you are testing with future data (relative to training).
+
+Fit two models to the training data: a simple overall mean and a linear regression model with the Date as a predictor variable.
+
+Calculate RMSE for the predictions of the two models on the test set. Which model performs better?
+
+```{r model}
+country_aus <- subset(meds, Country=="Australia")
+country_aus <- country_aus[order(country_aus$Month),]
+
+country_aus <- aggregate(VFD ~ Date, country_aus,sum)
+
+train_rows <- nrow(country_aus) * 0.92
+train_data <- country_aus[1:train_rows,]
+test_data  <- country_aus[-(1:train_rows),]
+
+mean_model <- mean(train_data$VFD)
+linear_model <- lm(VFD ~ Date, train_data)
+
+RMSE <- function(obs, pred) sqrt(mean((obs - pred)^2))
+data <- test_data$VFD
+RMSE(data, mean_model)
+RMSE(data, predict(linear_model, test_data))
+
+```
+
+The linear model performs better than the mean model on the test set, as it provides slightly better predictions.
+
+Plot the model predictions, it should look something like this (dotted line denotes the split between the training and test data, you don't need worry about creating the pink label):
+
+```{r plot}
+
+plot(country_aus$Date, country_aus$VFD, ty='l',
+     main="Monthly Car Import Value from Australia",
+     xlab="Year", ylab="Value for Duty (in millions NZD)")
+abline(h=mean_model, col="red", lwd=2)
+abline(linear_model, col="skyblue", lwd=2)
+abline(v=test_data$Date[1],lty = "dotted")
+
+```
+
+Do you think the linear model is sensible? Can you explain the obtained results?
+
+Both the models are showing similar results. But the results of linear model are better than mean model. If we compare RMSE values, the result of linear model is more accurate.
+
+## Summary
+
+Write a summary of your findings.
+
+In this lab, the focus was on analyzing the "Imports" dataset, specifically a subset containing data for medicaments (HS code starting with 3004) from 2000 to 2022.
+
+Bash Commands: Bash commands were used to create a folder for the lab files, display file details, and extract specific records for HSC 3004901919. The month column was extracted, and the smallest value in the column was printed. Total counts for all HS codes were calculated and displayed in ascending count order, with the last five lines shown.A new file was created, named "meds," containing data for specific HSC values.
+
+Data Preparation: The "meds" file was imported into R for further analysis. Data cleaning was performed, including converting the format of the "Month" column and ensuring numeric values had the correct data type.Column names were renamed for convenience.
+
+Exploratory Data Analysis: It was observed that Switzerland had the highest value of total VFD (presumably an important metric in the dataset).Many HS codes had low or zero values for a significant period, followed by an increase over time.
+
+Model Performance: Linear regression and mean models were employed to model the data.The linear model performed slightly better than the mean model, as indicated by the Root Mean Squared Error (RMSE) values for the predictions on the test set.
+
+Overall, the analysis provided insights into the import trends of medicaments from 2000 to 2022. Switzerland appeared to be a significant player in the import of these goods, and there was a noticeable increase in HS code values over time for several products. The linear model, which assumes a linear relationship between predictor variables and the target variable, outperformed the mean model in predicting import trends. However, it's important to note that further analysis and context would be required to draw more definitive conclusions and make informed decisions based on the findings.
